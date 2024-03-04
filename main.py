@@ -1,6 +1,6 @@
 
 from database import Database
-from database import encrypt_password,decrypt_password
+from database import encrypt_data,decrypt_data
 import base64
 if __name__ == '__main__':
     db = Database()
