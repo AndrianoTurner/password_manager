@@ -5,7 +5,9 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-def encrypt_password(master_password,password)->bytes:
+def encrypt_password(master_password : str,password : str)->bytes:
+    master_password = master_password.encode()
+    password = password.encode()
     salt = os.urandom(16)
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
@@ -16,9 +18,12 @@ def encrypt_password(master_password,password)->bytes:
     key = base64.urlsafe_b64encode(kdf.derive(master_password))
     f = Fernet(key)
     token = f.encrypt(password)
-    return token
-def decrypt_password(master_password,password)->bytes:
-    salt = os.urandom(16)
+    salt = base64.b64encode(salt)
+    return salt,token
+
+def decrypt_password(master_password,password,salt)->bytes:
+    master_password = master_password.encode()
+    salt=base64.b64decode(salt)
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
@@ -48,18 +53,24 @@ class Database():
         self.__first_init__()
     def __first_init__(self):
         self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS passwords (id INTEGER PRIMARY KEY, site TEXT, login TEXT, password BLOB)""")
+            CREATE TABLE IF NOT EXISTS passwords (id INTEGER PRIMARY KEY, site TEXT, login TEXT, password BLOB, salt BLOB)""")
         self.db.commit()
     def add_record(self,master_pass,site : str,login: str,password : str):
-        password = encrypt_password(master_pass)
-        self.cursor.execute("INSERT INTO passwords(site,login,password) VALUES(?,?,?)",(site,login,password))
+        salt,password = encrypt_password(master_pass,password)
+        self.cursor.execute("INSERT INTO passwords(site,login,password,salt) VALUES(?,?,?,?)",(site,login,password,salt))
         self.db.commit()
     def delete_record(self,record_id : int):
         self.cursor.execute("DELETE FROM passwords WHERE id = ?",(record_id,))
         self.db.commit()
     def get_record(self,record_id : int):
-        record = self.cursor.execute("SELECT site,login,password FROM passwords where id = ?",(record_id,)).fetchone()
+        record = self.cursor.execute("SELECT site,login,password,salt FROM passwords where id = ?",(record_id,)).fetchone()
         return record
+    def get_password(self,site : str,master_password : str) -> str:
+        salt,password = self.cursor.execute("SELECT salt,password FROM passwords WHERE site = ?",(site,)).fetchone()
+        password = decrypt_password(master_password,password,salt)
+        return password
+
+
     def update_record(self,master_pass,record_id : int, site=None,login=None,password=None,**kwargs):
         p_site,p_login,p_password = self.get_record(record_id)
         self.cursor.execute("UPDATE passwords SET site = ?,login = ?,password = ? WHERE id = ?",(site,login,password,record_id))
@@ -67,3 +78,4 @@ class Database():
     def close(self):
         self.cursor.close()
         self.db.close()
+
